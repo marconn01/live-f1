@@ -17,6 +17,10 @@ F1 9d          <- the bar pill: time until the next session
 Click it for the dashboard. It turns your theme's active colour while a
 session is running.
 
+<p align="center">
+  <img src="docs/preview.png" alt="The Formula 1 panel: next race, weekend schedule, upcoming races, and driver standings" width="480">
+</p>
+
 ## Install
 
 ```bash
@@ -45,7 +49,24 @@ omarchy bar move nocram.f1 --section right
 
 `./install.sh --link` symlinks instead of copying, for development — saving a
 file under `~/.config/omarchy/plugins/` hot-reloads the plugin.
-`./install.sh --remove` uninstalls.
+
+### What it writes, and uninstalling
+
+Nothing outside your home directory, and nothing needs root:
+
+| Path | Contents |
+|---|---|
+| `~/.config/omarchy/plugins/nocram.f1` | the plugin itself |
+| `~/.cache/omarchy/f1` | cached API responses, so the panel opens instantly and still works offline |
+| `~/.local/state/omarchy/f1/notified.json` | which notifications have already fired, so a restart cannot repeat one |
+
+`./install.sh --remove` deletes all three (add `--keep-data` to keep the cache
+and state). `omarchy plugin remove nocram.f1` removes only the plugin
+directory — clear the other two with:
+
+```bash
+rm -rf ~/.cache/omarchy/f1 ~/.local/state/omarchy/f1
+```
 
 ### Requirements
 
