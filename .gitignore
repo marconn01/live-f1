@@ -1,0 +1,11 @@
+# Editor / local tool state
+.vscode/
+.idea/
+
+# Scratch and captures
+*.log
+node_modules/
+
+# OS noise
+.DS_Store
+*~

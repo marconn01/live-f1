@@ -1,0 +1,96 @@
+{
+  "schemaVersion": 1,
+  "id": "nocram.f1",
+  "name": "Formula 1",
+  "version": "1.0.0",
+  "author": "nocram",
+  "license": "MIT",
+  "description": "Next Grand Prix, weekend schedule in your local timezone, driver standings, and a live timing dashboard in the Omarchy bar.",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "Formula 1",
+    "description": "One bar pill and one panel: next race countdown, full weekend schedule in laptop-local time, the circuit map, driver standings, the qualifying grid, upcoming races, and live race timing.",
+    "category": "Info",
+    "aliases": ["f1", "formula1", "grand-prix"],
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "defaults": {
+      "timeFormat": "24-hour",
+      "autoLive": true,
+      "liveRefreshSec": 12,
+      "refreshMinutes": 15,
+      "notifications": true,
+      "notifyLeadMinutes": "30,15",
+      "notifySessions": ["Race", "Qualifying", "Sprint"],
+      "highlightDriver": "Verstappen"
+    },
+    "schema": [
+      {
+        "key": "timeFormat",
+        "type": "enum",
+        "label": "Time format",
+        "options": ["24-hour", "12-hour"],
+        "defaultValue": "24-hour",
+        "description": "All times are always shown in this laptop's own timezone; this only picks the clock style."
+      },
+      {
+        "key": "autoLive",
+        "type": "boolean",
+        "label": "Switch to live mode automatically",
+        "defaultValue": true,
+        "description": "Open the panel on the live dashboard while a race session is running. The manual toggle always wins."
+      },
+      {
+        "key": "liveRefreshSec",
+        "type": "integer",
+        "label": "Live refresh interval (seconds)",
+        "min": 5,
+        "max": 120,
+        "step": 1,
+        "defaultValue": 12,
+        "description": "Only polled while live mode is on and a session is actually running."
+      },
+      {
+        "key": "refreshMinutes",
+        "type": "integer",
+        "label": "Standings refresh interval (minutes)",
+        "min": 5,
+        "max": 720,
+        "step": 5,
+        "defaultValue": 15
+      },
+      {
+        "key": "notifications",
+        "type": "boolean",
+        "label": "Desktop notifications",
+        "defaultValue": true
+      },
+      {
+        "key": "notifyLeadMinutes",
+        "type": "string",
+        "label": "Notify this many minutes before",
+        "defaultValue": "30,15",
+        "description": "Comma-separated, e.g. \"60,30,15\". A start and a finish notification are always sent for the sessions selected below."
+      },
+      {
+        "key": "notifySessions",
+        "type": "multiselect",
+        "label": "Notify for these sessions",
+        "options": ["Race", "Qualifying", "Sprint", "Practice"],
+        "defaultValue": ["Race", "Qualifying", "Sprint"]
+      },
+      {
+        "key": "highlightDriver",
+        "type": "string",
+        "label": "Always-visible driver",
+        "defaultValue": "Verstappen",
+        "description": "Pinned below the top five whenever they fall outside it. Match on surname, code, or driver id."
+      }
+    ]
+  }
+}
