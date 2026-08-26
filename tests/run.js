@@ -582,6 +582,57 @@ check("every live feed tolerates a truncated response", () => {
   equal(Object.keys(F1Live.parseDrivers(truncated)).length, 0)
 })
 
+// ------------------------------------------------------- hostile feed content
+
+// Every string below is one an API (or a poisoned cache file) could hand the
+// plugin. None of them is exotic input for its own sake: each one previously
+// reached somewhere it should not have.
+
+check("a driver number that names a prototype member is dropped", () => {
+  const rows = JSON.stringify([
+    { driver_number: "__proto__", lap_number: 1, pit_duration: 2 },
+    { driver_number: "constructor", lap_number: 1 },
+    { driver_number: 44, lap_number: 12, pit_duration: 2.4 }
+  ])
+
+  const pits = F1Live.parsePits(rows)
+  equal(Object.keys(pits).length, 1, "only the real driver is tallied")
+  equal(pits["44"].count, 1)
+  // The bug this guards: byDriver["__proto__"].count++ wrote onto
+  // Object.prototype, giving every object in the engine a `count`.
+  equal({}.count, undefined, "Object.prototype was polluted")
+  equal(Object.getPrototypeOf(pits), Object.prototype, "the map's prototype was replaced")
+
+  const drivers = F1Live.parseDrivers(rows)
+  equal(Object.keys(drivers).length, 1)
+  equal(Object.getPrototypeOf(drivers), Object.prototype)
+
+  equal(F1Live.driverKey(44), "44")
+  equal(F1Live.driverKey("__proto__"), "")
+  equal(F1Live.driverKey(null), "")
+})
+
+check("a notification argument can never look like an option", () => {
+  // omarchy-notification-send parses options anywhere in its argument list,
+  // --exec among them, and both arguments are built from API-supplied names.
+  equal(F1Model.notificationArg("--exec", "Formula 1"), "exec")
+  equal(F1Model.notificationArg("-u critical", "Formula 1"), "u critical")
+  equal(F1Model.notificationArg("   --image /etc/shadow", ""), "image /etc/shadow")
+  equal(F1Model.notificationArg("Race\nstarts\u0000now", ""), "Race starts now")
+  equal(F1Model.notificationArg("", "Formula 1"), "Formula 1")
+  equal(F1Model.notificationArg(null, ""), "")
+  equal(F1Model.notificationArg("Qualifying starts in 30 minutes", ""),
+    "Qualifying starts in 30 minutes")
+  assert(F1Model.notificationArg("x".repeat(500), "").length <= 160, "not truncated")
+})
+
+check("a constructor named after a prototype member gets a real colour", () => {
+  for (const name of ["constructor", "toString", "valueOf", "hasOwnProperty"]) {
+    const colour = F1Teams.colorFor(name, name, "")
+    assert(/^#[0-9a-f]{6}$/.test(colour), `${name} -> ${colour}`)
+  }
+})
+
 // -------------------------------------------------------------------- liveries
 
 check("known constructors get their livery colour", () => {

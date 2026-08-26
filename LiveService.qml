@@ -151,6 +151,7 @@ QtObject {
     // than the poll cadence — accumulated state covers the rest.
     var intervalWindow = Math.max(20, root.refreshSeconds * 2 + 5) * 1000
     fastProc.command = ["sh", "-c", root.batchScript, "omarchy-f1-live",
+      String(root.maxBytes),
       "position=" + endpoint("position", "&date%3E=" + windowFrom(20 * F1Time.MINUTE) + "&date%3C=" + windowTo()),
       "intervals=" + endpoint("intervals", "&date%3E=" + windowFrom(intervalWindow) + "&date%3C=" + windowTo())]
     fastProc.running = true
@@ -159,6 +160,7 @@ QtObject {
   function pollSlow() {
     if (!polls || slowProc.running) return
     slowProc.command = ["sh", "-c", root.batchScript, "omarchy-f1-live",
+      String(root.maxBytes),
       "drivers=" + endpoint("drivers", ""),
       "pit=" + endpoint("pit", ""),
       "race_control=" + endpoint("race_control", "&date%3E=" + windowFrom(45 * F1Time.MINUTE) + "&date%3C=" + windowTo()),
@@ -166,14 +168,36 @@ QtObject {
     slowProc.running = true
   }
 
+  // Every poll body is read into memory whole by the StdioCollector on the
+  // other end of this pipe, so each one is capped. The largest real response
+  // is a full race's lap feed, measured at ~640KB; the windowed feeds are tens
+  // of kilobytes.
+  readonly property int maxBytes: 2097152
+
   // Fetch each "name=url" argument in turn, printing a marker before each body.
   // One process, one set of TLS handshakes, one exit to handle.
+  //
+  // Bodies land in a private temporary file rather than straight on stdout:
+  // that is what makes both the byte cap and the "[]" fallback for a failed
+  // request possible, since a pipeline would report the exit status of the cap
+  // instead of the one from curl.
   readonly property string batchScript:
+    'set -u\n' +
+    'max=$1; shift\n' +
+    'tmp=$(mktemp) || exit 1\n' +
+    'trap \'rm -f "$tmp"\' EXIT INT TERM\n' +
     'for spec in "$@"; do\n' +
     '  name=${spec%%=*}\n' +
     '  url=${spec#*=}\n' +
     '  printf "===%s===\\n" "$name"\n' +
-    '  curl -fsS --max-time 10 -H "User-Agent: omarchy-f1-plugin/1.0" "$url" || printf "[]"\n' +
+    // No -L: these are fixed https endpoints, and a redirect off them is
+    // nothing this plugin should follow.
+    '  if curl -fsS --proto "=https" --max-filesize "$max" --max-time 10 \\\n' +
+    '       -H "User-Agent: omarchy-f1-plugin/1.0" "$url" -o "$tmp"; then\n' +
+    '    head -c "$max" "$tmp"\n' +
+    '  else\n' +
+    '    printf "[]"\n' +
+    '  fi\n' +
     '  printf "\\n"\n' +
     'done\n'
 
@@ -259,7 +283,9 @@ QtObject {
 
   property Process probeProc: Process {
     id: probeProc
-    command: ["curl", "-fsS", "--max-time", "8", "-H", "User-Agent: omarchy-f1-plugin/1.0",
+    command: ["curl", "-fsS", "--proto", "=https",
+      "--max-filesize", String(root.maxBytes), "--max-time", "8",
+      "-H", "User-Agent: omarchy-f1-plugin/1.0",
       "https://api.openf1.org/v1/sessions?session_key=latest"]
     stdout: StdioCollector {
       waitForEnd: true

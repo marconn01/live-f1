@@ -9,8 +9,8 @@ import Quickshell.Io
 // results, and the circuit metadata rather than being reinvented per call site.
 //
 // The whole read-through cache is one small shell pipeline, which keeps the
-// atomic write (download to .tmp, rename into place) and the "serve what we
-// have when the network is down" fallback in a single step:
+// atomic write (download to a private mktemp file, rename into place) and the
+// "serve what we have when the network is down" fallback in a single step:
 //
 //   CACHE  the file on disk is younger than ttlSeconds — no request was made
 //   FRESH  the network answered and the cache was replaced
@@ -54,7 +54,8 @@ QtObject {
     fetchProc.command = ["sh", "-c", root.script, "omarchy-f1",
       root.name, root.url,
       String(root.timeoutSeconds),
-      String(force === true ? 0 : Math.max(0, root.ttlSeconds))]
+      String(force === true ? 0 : Math.max(0, root.ttlSeconds)),
+      String(root.maxBytes)]
     fetchProc.running = true
   }
 
@@ -63,32 +64,62 @@ QtObject {
     root.retries = 0
   }
 
+  // Cap on both the download and the cache read. Every response this plugin
+  // asks for is a few hundred kilobytes at most; anything larger is either a
+  // wrong endpoint or something hostile, and it would be read into memory
+  // whole by the StdioCollector on the other end of this pipe.
+  readonly property int maxBytes: 8388608
+
   readonly property string script:
     'set -u\n' +
+    'export LC_ALL=C\n' +
     'dir="${XDG_CACHE_HOME:-$HOME/.cache}/omarchy/f1"\n' +
     'mkdir -p "$dir" || exit 1\n' +
-    'file="$dir/$1.json"\n' +
-    'url="$2"; timeout="$3"; ttl="$4"\n' +
-    'if [ -f "$file" ] && [ "$ttl" -gt 0 ]; then\n' +
+    'name="$1"; url="$2"; timeout="$3"; ttl="$4"; max="$5"\n' +
+    // The cache key carries API-supplied fields (circuit id, round, season),
+    // so it is constrained rather than trusted: a value with a slash or a
+    // leading dot-dot would otherwise name a file outside the cache dir.
+    'case "$name" in\n' +
+    '  "" | *[!A-Za-z0-9._-]*) printf "MISS 0\\n"; exit 0 ;;\n' +
+    'esac\n' +
+    'file="$dir/$name.json"\n' +
+    // Only ever stat, serve, or replace a plain regular file of sane size. A
+    // symlink planted at this path would redirect the write onto the target
+    // it names, and a fifo would hang the read forever.
+    'usable() { [ ! -L "$1" ] && [ -f "$1" ] && [ -s "$1" ] && [ "$(stat -c %s "$1")" -le "$max" ]; }\n' +
+    'if usable "$file" && [ "$ttl" -gt 0 ]; then\n' +
     '  age=$(( $(date +%s) - $(stat -c %Y "$file") ))\n' +
     '  if [ "$age" -lt "$ttl" ]; then\n' +
     '    printf "CACHE %s\\n" "$(stat -c %Y "$file")"\n' +
-    '    cat "$file"\n' +
+    '    head -c "$max" "$file"\n' +
     '    exit 0\n' +
     '  fi\n' +
     'fi\n' +
     'status=STALE\n' +
-    'if curl -fsSL --max-time "$timeout" -H "User-Agent: omarchy-f1-plugin/1.0" "$url" -o "$file.part" 2>/dev/null && [ -s "$file.part" ]; then\n' +
-    '  mv -f "$file.part" "$file" && status=FRESH\n' +
-    'else\n' +
-    '  rm -f "$file.part"\n' +
+    // mktemp, not "$file.part": a predictable download path in a directory
+    // this process does not own exclusively is a file another local process
+    // can pre-create, replace, or point elsewhere between our writes.
+    'tmp=$(mktemp "$dir/.$name.XXXXXXXX") || exit 1\n' +
+    'trap \'rm -f "$tmp"\' EXIT INT TERM\n' +
+    // https only, on the first request and on every redirect, with a bounded
+    // hop count — a 30x answer must not be able to walk this fetch onto
+    // file://, onto a local address, or around a redirect loop. --max-filesize
+    // stops the transfer itself; the stat is the backstop for a response that
+    // declares no length.
+    'if curl -fsS -L --proto "=https" --proto-redir "=https" --max-redirs 3 \\\n' +
+    '     --max-filesize "$max" --max-time "$timeout" \\\n' +
+    '     -H "User-Agent: omarchy-f1-plugin/1.0" "$url" -o "$tmp" 2>/dev/null \\\n' +
+    '   && [ -s "$tmp" ] && [ "$(stat -c %s "$tmp")" -le "$max" ]; then\n' +
+    '  if [ -L "$file" ]; then rm -f "$file"; fi\n' +
+    '  mv -f "$tmp" "$file" && status=FRESH\n' +
     'fi\n' +
-    'if [ ! -f "$file" ]; then\n' +
+    'rm -f "$tmp"\n' +
+    'if ! usable "$file"; then\n' +
     '  printf "MISS 0\\n"\n' +
     '  exit 0\n' +
     'fi\n' +
     'printf "%s %s\\n" "$status" "$(stat -c %Y "$file")"\n' +
-    'cat "$file"\n'
+    'head -c "$max" "$file"\n'
 
   function handle(raw) {
     root.loading = false

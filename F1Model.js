@@ -53,6 +53,25 @@ function str(value) {
   return value === undefined || value === null ? "" : String(value)
 }
 
+// Text on its way to the notification helper's command line.
+//
+// omarchy-notification-send scans its WHOLE argument list for options, not
+// just the leading ones, and one of those options is --exec: a command the
+// shell runs when the toast is clicked. Titles and bodies here are built from
+// names the API supplied, so a name that looks like an option corrupts the
+// call — today that costs a dropped notification, and it is one extra argument
+// at the call site away from handing --exec a value. So nothing that reaches
+// an argument may look like an option, carry a control character, or run on
+// unbounded.
+function notificationArg(value, fallback) {
+  var text = str(value)
+    .replace(/[\u0000-\u001f\u007f]+/g, " ")
+    .replace(/^[\s-]+/, "")
+    .replace(/\s+$/, "")
+  if (text.length > 160) text = text.slice(0, 159) + "\u2026"
+  return text === "" ? str(fallback) : text
+}
+
 function safeParse(raw) {
   try {
     var parsed = JSON.parse(String(raw || ""))
@@ -554,6 +573,7 @@ if (typeof module !== "undefined") {
   module.exports = {
     NOMINAL_DURATION_MIN: NOMINAL_DURATION_MIN,
     safeParse: safeParse,
+    notificationArg: notificationArg,
     parseRaces: parseRaces,
     parseOpenF1Sessions: parseOpenF1Sessions,
     refineRace: refineRace,

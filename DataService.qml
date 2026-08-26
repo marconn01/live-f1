@@ -76,7 +76,9 @@ QtObject {
   readonly property double lastUpdatedAt: Math.max(calendar.lastSuccessAt, standings.lastSuccessAt)
 
   readonly property string ergastBase: "https://api.jolpi.ca/ergast/f1"
-  readonly property string seasonPath: season === "" ? "current" : season
+  // Rolled forward from the season field of a calendar the API sent us, so it
+  // is kept to digits: it lands in both a request path and a cache file name.
+  readonly property string seasonPath: /^[0-9]{4}$/.test(season) ? season : "current"
 
   // ------------------------------------------------------------ control
 
@@ -166,7 +168,8 @@ QtObject {
     id: qualifyingFetch
     name: "qualifying-" + root.seasonPath + "-" + (root.race ? root.race.round : 0)
     url: root.race
-      ? root.ergastBase + "/" + root.seasonPath + "/" + root.race.round + "/qualifying/?format=json"
+      ? root.ergastBase + "/" + root.seasonPath + "/"
+        + encodeURIComponent(root.race.round) + "/qualifying/?format=json"
       : ""
     ttlSeconds: 900
     onPayload: function(text) {
@@ -181,7 +184,8 @@ QtObject {
     url: root.race && root.race.circuitId !== ""
       // Every winning result ever recorded at this circuit, oldest first; the
       // last row is the most recent running and therefore the current distance.
-      ? root.ergastBase + "/circuits/" + root.race.circuitId + "/results/1/?format=json&limit=100"
+      ? root.ergastBase + "/circuits/" + encodeURIComponent(root.race.circuitId)
+        + "/results/1/?format=json&limit=100"
       : ""
     ttlSeconds: 30 * 86400
     onPayload: function(text) {

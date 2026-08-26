@@ -16,6 +16,18 @@
 // unknown where it has to be.
 // ---------------------------------------------------------------------------
 
+// Every per-driver map in this file is keyed on a number the feed supplies,
+// so the key is checked before it is used. A row arriving as driver_number
+// "__proto__" would otherwise reach an object's prototype instead of landing
+// in the object: in parsePits below, `byDriver[key].count++` on such a key
+// increments a counter on Object.prototype rather than on a driver's tally,
+// and every plain object in the QML engine inherits it.
+function driverKey(value) {
+  if (value === undefined || value === null) return ""
+  var key = String(value)
+  return /^[0-9]{1,3}$/.test(key) ? key : ""
+}
+
 function safeRows(raw) {
   try {
     var parsed = JSON.parse(String(raw || ""))
@@ -54,8 +66,9 @@ function latestPerDriver(rows) {
   var byDriver = {}
   for (var i = 0; i < rows.length; i++) {
     var row = rows[i]
-    if (!row || row.driver_number === undefined || row.driver_number === null) continue
-    var key = String(row.driver_number)
+    if (!row) continue
+    var key = driverKey(row.driver_number)
+    if (key === "") continue
     var at = F1Time.parseIso(row.date)
     var current = byDriver[key]
     if (!current || at === null || current.__at === null || at >= current.__at) {
@@ -73,9 +86,11 @@ function parseDrivers(raw) {
   var byNumber = {}
   for (var i = 0; i < rows.length; i++) {
     var row = rows[i]
-    if (!row || row.driver_number === undefined) continue
-    byNumber[String(row.driver_number)] = {
-      number: parseInt(row.driver_number, 10),
+    if (!row) continue
+    var number = driverKey(row.driver_number)
+    if (number === "") continue
+    byNumber[number] = {
+      number: parseInt(number, 10),
       acronym: String(row.name_acronym || ""),
       fullName: String(row.full_name || ""),
       teamName: String(row.team_name || ""),
@@ -91,8 +106,9 @@ function parsePits(raw) {
   var byDriver = {}
   for (var i = 0; i < rows.length; i++) {
     var row = rows[i]
-    if (!row || row.driver_number === undefined) continue
-    var key = String(row.driver_number)
+    if (!row) continue
+    var key = driverKey(row.driver_number)
+    if (key === "") continue
     if (!byDriver[key]) byDriver[key] = { count: 0, lastLap: null, lastDuration: null }
     byDriver[key].count++
     var lap = parseInt(row.lap_number, 10)
@@ -219,6 +235,7 @@ function freshestUpdate(grid, fallbackAt) {
 
 if (typeof module !== "undefined") {
   module.exports = {
+    driverKey: driverKey,
     safeRows: safeRows,
     latestPerDriver: latestPerDriver,
     mergeLatest: mergeLatest,

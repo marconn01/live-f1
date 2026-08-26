@@ -113,6 +113,15 @@ check("everything degrades to empty rather than throwing", () => {
   equal(F1Circuit.slug(undefined), "")
 })
 
+check("a circuit id naming a prototype member resolves to no map", () => {
+  // The lookup key is API-supplied. Before the own-property check these
+  // returned an inherited function, which was then pasted into a file path.
+  for (const id of ["constructor", "toString", "valueOf", "hasOwnProperty"]) {
+    equal(F1Circuit.mapFileFor(race(id, id)), "", id)
+    equal(F1Circuit.mapPathFor(race(id, id)), "", id)
+  }
+})
+
 console.log(`\n${passed} passed, ${failures.length} failed`)
 for (const failure of failures) console.log(`  FAIL  ${failure}`)
 process.exit(failures.length === 0 ? 0 : 1)

@@ -107,17 +107,24 @@ function slug(value) {
     .replace(/^-+|-+$/g, "")
 }
 
+// Both tables are keyed on strings the API supplies, so only their own entries
+// count — a circuit id that slugs to "constructor" or "toString" would
+// otherwise resolve to an inherited function and be pasted into a file path.
+function entry(table, key) {
+  return key !== "" && Object.prototype.hasOwnProperty.call(table, key) ? table[key] : ""
+}
+
 // The shipped map filename for a race, or "" when this circuit has no drawing
 // in the set — a one-off street track on a new calendar, say. The caller shows
 // the circuit's name and location instead; a missing map is never an error.
 function mapFileFor(race) {
   if (!race) return ""
 
-  var byId = BY_ID[slug(race.circuitId).replace(/-/g, "_")]
-  if (byId) return byId
+  var byId = entry(BY_ID, slug(race.circuitId).replace(/-/g, "_"))
+  if (byId !== "") return byId
 
-  var byLocality = BY_LOCALITY[slug(race.locality)]
-  if (byLocality) return byLocality
+  var byLocality = entry(BY_LOCALITY, slug(race.locality))
+  if (byLocality !== "") return byLocality
 
   return ""
 }

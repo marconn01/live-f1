@@ -67,10 +67,17 @@ function normalizeKey(value) {
     .toLowerCase()
 }
 
+// Both tables below are looked up with keys the API supplies, so only their
+// own entries count: a constructor genuinely named "constructor" or "toString"
+// would otherwise resolve to an inherited function where a colour is expected.
+function entry(table, key) {
+  return key !== "" && Object.prototype.hasOwnProperty.call(table, key) ? table[key] : null
+}
+
 function canonicalId(constructorId, constructorName) {
   var id = normalizeKey(constructorId)
-  if (id !== "" && TEAM_COLORS[id]) return id
-  var alias = NAME_ALIASES[normalizeKey(constructorName)]
+  if (entry(TEAM_COLORS, id) !== null) return id
+  var alias = entry(NAME_ALIASES, normalizeKey(constructorName))
   if (alias) return alias
   return id
 }
@@ -116,7 +123,8 @@ function colorFor(constructorId, constructorName, liveColour) {
   if (/^[0-9a-fA-F]{6}$/.test(live)) return "#" + live.toLowerCase()
 
   var id = canonicalId(constructorId, constructorName)
-  if (TEAM_COLORS[id]) return TEAM_COLORS[id]
+  var known = entry(TEAM_COLORS, id)
+  if (known) return known
   return derivedColor(id || constructorName)
 }
 
