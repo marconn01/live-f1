@@ -5,7 +5,7 @@
   "version": "1.0.0",
   "author": "nocram",
   "license": "MIT",
-  "description": "Next Grand Prix, weekend schedule in your local timezone, driver standings, and a live timing dashboard in the Omarchy bar.",
+  "description": "Next Grand Prix, weekend schedule in your local timezone, driver standings with a live points gap to the leader for the driver you pin (Max Verstappen by default), and a live timing dashboard in the Omarchy bar.",
   "kinds": [
     "bar-widget"
   ],
@@ -14,7 +14,7 @@
   },
   "barWidget": {
     "displayName": "Formula 1",
-    "description": "One bar pill and one panel: next race countdown, full weekend schedule in laptop-local time, the circuit map, driver standings, the qualifying grid, upcoming races, and live race timing.",
+    "description": "One bar pill and one panel: next race countdown, full weekend schedule in laptop-local time, the circuit map, driver standings with your pinned driver's points gap to the leader, the qualifying grid, upcoming races, and live race timing.",
     "category": "Info",
     "aliases": ["f1", "formula1", "grand-prix"],
     "allowMultiple": false,

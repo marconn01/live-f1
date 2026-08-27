@@ -10,15 +10,15 @@ loaded into the running `omarchy-shell` process, themed entirely from
 `qs.Commons`/`qs.Ui`, so it follows your theme, font, spacing, and corner
 radius without configuration.
 
-```
-F1 9d          <- the bar pill: time until the next session
-```
+<p align="center">
+  <img src="docs/bar-pill.png" alt="The bar pill reading F1 8d" width="120">
+</p>
 
-Click it for the dashboard. It turns your theme's active colour while a
-session is running.
+The bar pill counts down to the next session. Click it for the dashboard; it
+turns your theme's active colour while a session is running.
 
 <p align="center">
-  <img src="preview.png" alt="The Formula 1 panel: next race, weekend schedule, upcoming races, and driver standings" width="480">
+  <img src="preview.png" alt="The Formula 1 panel: next race, weekend schedule, circuit map, upcoming races, and driver standings with Max Verstappen pinned" width="480">
 </p>
 
 ## Install
@@ -116,8 +116,13 @@ championship.
 sprint marker, countdown. No session breakdown.
 
 **Standings** — top five drivers with team and livery, and a configurable
-driver (Verstappen by default) pinned below with their gap to the leader
-whenever they are outside the top five.
+driver (Max Verstappen by default) pinned below with their points gap to the
+championship leader whenever they fall outside the top five. Set
+`highlightDriver` to any surname, code, or driver id to follow someone else.
+
+<p align="center">
+  <img src="docs/standings-gap.png" alt="Driver standings: the top five, with Max Verstappen pinned below at P6 showing 130 pts behind leader" width="560">
+</p>
 
 **Live race** — a prominent toggle. On, the panel becomes a timing tower:
 positions, abbreviations, teams and liveries, interval, gap to leader, pit
