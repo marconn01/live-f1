@@ -130,6 +130,12 @@ stops, `LAP 42 / 57`, flag state, and `Live • Updated 8s ago` freshness read
 from the feed's own timestamps. With no session running it says so plainly and
 points at the next one. Optionally switches on by itself when a race starts.
 
+<p align="center">
+  <img src="docs/live-toggle.png" alt="The same panel with live mode off and on: the race overview on the left, and on the right the live view reporting that no race is currently live and naming the next session" width="760">
+</p>
+
+<p align="center"><em>Live mode off and on, between race weekends.</em></p>
+
 ## Configuration
 
 Settings are inline on the plugin's `shell.json` entry, per Omarchy's
