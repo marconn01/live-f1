@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Install (or reinstall) the Formula 1 plugin into the Omarchy shell.
+# Install (or reinstall) the F1 Live plugin into the Omarchy shell.
 #
 #   ./install.sh              copy the plugin into ~/.config/omarchy/plugins
 #   ./install.sh --link       symlink it instead, for development

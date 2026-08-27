@@ -135,8 +135,8 @@ QtObject {
   // command line, so both go through F1Model.notificationArg — which is where
   // the reasoning about that lives.
   function send(title, body) {
-    notifyProc.command = ["omarchy-notification-send", "--app-name", "Formula 1",
-      F1Model.notificationArg(title, "Formula 1"),
+    notifyProc.command = ["omarchy-notification-send", "--app-name", "F1 Live",
+      F1Model.notificationArg(title, "F1 Live"),
       F1Model.notificationArg(body, "")]
     notifyProc.running = true
   }

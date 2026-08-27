@@ -1,9 +1,10 @@
-# Formula 1 for Omarchy
+# F1 Live for Omarchy
 
 A bar widget and dashboard panel for the [Omarchy](https://omarchy.org) shell:
-the next Grand Prix, its full weekend schedule **in your laptop's own
-timezone**, driver standings, the starting grid, the circuit map, and a live
-timing tower while a session is running.
+a **live timing tower** while a session is running, **live driver standings**
+carrying the points gap your pinned driver (Max Verstappen by default) holds to
+the championship leader, the next Grand Prix and its full weekend schedule **in
+your laptop's own timezone**, the starting grid, and the circuit map.
 
 Built as a normal third-party Omarchy plugin — a `manifest.json` plus QML,
 loaded into the running `omarchy-shell` process, themed entirely from
@@ -18,7 +19,7 @@ The bar pill counts down to the next session. Click it for the dashboard; it
 turns your theme's active colour while a session is running.
 
 <p align="center">
-  <img src="preview.png" alt="The Formula 1 panel: next race, weekend schedule, circuit map, upcoming races, and driver standings with Max Verstappen pinned" width="480">
+  <img src="preview.png" alt="The F1 Live panel: next race, weekend schedule, circuit map, upcoming races, and driver standings with Max Verstappen pinned" width="480">
 </p>
 
 ## Install
@@ -105,6 +106,14 @@ completed / live / starting soon / upcoming, each carrying its own countdown.
 Sprint weekends are flagged in the hero and show their own sessions. Only the
 next race gets this detail.
 
+<p align="center">
+  <img src="docs/next-race.png" alt="The next race hero: Italian Grand Prix at Autodromo Nazionale di Monza, lights out Sunday 6 Sep 18:45 local time, with the circuit map on the right" width="560">
+</p>
+
+<p align="center">
+  <img src="docs/weekend-schedule.png" alt="The weekend schedule: FP1, FP2, FP3, Qualifying and Race, each with its local day, start time, and countdown" width="560">
+</p>
+
 **Race weekend state** — the headline adapts: `NEXT RACE`, `FP1 STARTS SOON`,
 `QUALIFYING LIVE`, `RACE LIVE`, `RACE FINISHED`.
 
@@ -114,6 +123,10 @@ championship.
 
 **Upcoming races** — compact cards: Grand Prix, location, local date and time,
 sprint marker, countdown. No session breakdown.
+
+<p align="center">
+  <img src="docs/upcoming-races.png" alt="Upcoming races: rounds 14, 15 and 16 with location, local date and time, and a countdown for each" width="560">
+</p>
 
 **Standings** — top five drivers with team and livery, and a configurable
 driver (Max Verstappen by default) pinned below with their points gap to the
@@ -135,6 +148,10 @@ points at the next one. Optionally switches on by itself when a race starts.
 </p>
 
 <p align="center"><em>Live mode off and on, between race weekends.</em></p>
+
+<p align="center">
+  <img src="docs/live-timing.png" alt="The live view with no session running: it says no race is currently live and names the next session with its countdown" width="560">
+</p>
 
 ## Configuration
 

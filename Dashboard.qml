@@ -8,7 +8,7 @@ import "F1Time.js" as F1Time
 import "F1Model.js" as F1Model
 import "F1Teams.js" as F1Teams
 
-// The Formula 1 dashboard.
+// The F1 Live dashboard.
 //
 // This file is presentation and wiring only. It owns no parsing, no fetching,
 // no caching, and — most deliberately — no timezone arithmetic: every instant
@@ -138,12 +138,12 @@ Panel {
   }
 
   readonly property string tooltipText: {
-    if (!dataSvc.loaded) return "Formula 1 — loading"
-    if (dataSvc.offSeason) return "Formula 1 — off season"
+    if (!dataSvc.loaded) return "F1 Live — loading"
+    if (dataSvc.offSeason) return "F1 Live — off season"
     var running = dataSvc.liveSession
     if (running) return running.name + " is live — " + dataSvc.race.name
     var next = dataSvc.race ? F1Model.nextSession(dataSvc.race, now) : null
-    if (!next || !dataSvc.race) return "Formula 1"
+    if (!next || !dataSvc.race) return "F1 Live"
     return dataSvc.race.name + " · " + next.name + " " + fmtDayTime(next.startAt) + " (" + countdownTo(next.startAt) + ")"
   }
 

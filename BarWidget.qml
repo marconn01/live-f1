@@ -67,8 +67,8 @@ BarWidget {
   // an option in the first place.
   function announce() {
     if (!root.bar || !panelLoader.item) return
-    var text = F1Model.notificationArg(panelLoader.item.tooltipText, "Formula 1")
-    root.bar.run("omarchy-notification-send --app-name 'Formula 1' 'Formula 1' "
+    var text = F1Model.notificationArg(panelLoader.item.tooltipText, "F1 Live")
+    root.bar.run("omarchy-notification-send --app-name 'F1 Live' 'F1 Live' "
       + Util.shellQuote(text))
   }
 
@@ -164,7 +164,7 @@ BarWidget {
     }
 
     Accessible.role: Accessible.Button
-    Accessible.name: "Formula 1"
-    Accessible.description: panelLoader.item ? panelLoader.item.tooltipText : "Formula 1 dashboard"
+    Accessible.name: "F1 Live"
+    Accessible.description: panelLoader.item ? panelLoader.item.tooltipText : "F1 Live dashboard"
   }
 }
