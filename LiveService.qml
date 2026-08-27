@@ -177,40 +177,57 @@ QtObject {
   // Fetch each "name=url" argument in turn, printing a marker before each body.
   // One process, one set of TLS handshakes, one exit to handle.
   //
-  // Each body goes through `head` into a private temporary file rather than
-  // straight down curl's -o. --max-filesize only refuses a length the server
-  // declares up front, so a chunked or unlabelled response walks straight past
-  // it and -o would spool all of it to disk before anything could measure it;
-  // head closes the pipe at the cap instead, which is a bound the far end
-  // cannot talk its way around. The file is still what makes the "[]" fallback
-  // possible: $? after a pipeline belongs to head, so curl's own status is
-  // parked in a second file, and without it a connection dropped mid-body
-  // would be indistinguishable from a complete answer.
+  // Each body is spooled through a hard byte cap into an unlinked temporary
+  // file, so a response is bounded on disk as well as in memory and never
+  // exists under a name anything else can reach. The details are inline below.
   readonly property string batchScript:
     'set -u\n' +
     'export LC_ALL=C\n' +
     'max=$1; shift\n' +
-    'tmp=$(mktemp) || exit 1\n' +
-    'rcf=$(mktemp) || { rm -f "$tmp"; exit 1; }\n' +
-    'trap \'rm -f "$tmp" "$rcf"\' EXIT INT TERM\n' +
     'for spec in "$@"; do\n' +
     '  name=${spec%%=*}\n' +
     '  url=${spec#*=}\n' +
     '  printf "===%s===\\n" "$name"\n' +
+    // The response body never exists under a name anything else can reach.
+    // The temporary file is opened for reading and for writing, its identity
+    // is confirmed against the name that created it, and then the name is
+    // unlinked: from here the body is two descriptors and nothing more, so
+    // there is no path left for another process to pre-plant, swap for a
+    // symlink or a fifo, or point at a file of its choosing.
+    '  tmp=$(mktemp) || exit 1\n' +
+    '  exec 5< "$tmp" 4> "$tmp"\n' +
+    '  ok=0\n' +
+    '  if [ -f /proc/self/fd/5 ] \\\n' +
+    '     && [ "$(stat -Lc %d:%i /proc/self/fd/5)" = "$(stat -c %d:%i "$tmp")" ]; then\n' +
+    '    ok=1\n' +
+    '  fi\n' +
+    '  rm -f "$tmp"\n' +
     // No -L: these are fixed https endpoints, and a redirect off them is
     // nothing this plugin should follow.
-    '  { curl -fsS --proto "=https" --max-filesize "$max" --max-time 10 \\\n' +
-    '         -H "User-Agent: omarchy-f1-plugin/1.0" "$url" -o - 2>/dev/null\n' +
-    '    printf "%s" "$?" > "$rcf"\n' +
-    '  } | head -c "$(( max + 1 ))" > "$tmp"\n' +
+    //
+    // head is the hard byte bound. --max-filesize only refuses a length the
+    // server declares up front, so a chunked or unlabelled response walks
+    // straight past it, and -o would have spooled all of it to disk before
+    // anything could measure it; head closes the pipe at the cap instead,
+    // which is a bound the far end cannot talk its way around. curl's own
+    // exit status leaves on fd 3 — $? after a pipeline belongs to head, and
+    // without it a connection dropped mid-body would be indistinguishable
+    // from a complete answer.
+    '  rc=$({ { curl -fsS --proto "=https" --max-filesize "$max" --max-time 10 \\\n' +
+    '               -H "User-Agent: omarchy-f1-plugin/1.0" "$url" -o - 2>/dev/null\n' +
+    '           printf "%s" "$?" >&3\n' +
+    '         } | head -c "$(( max + 1 ))" >&4\n' +
+    '       } 3>&1)\n' +
+    '  exec 4>&-\n' +
     // One byte over the cap is how an oversized body is told apart from one
     // that merely fills it; either way the round trip degrades to "[]".
-    '  rc=$(cat "$rcf" 2>/dev/null)\n' +
-    '  if [ "${rc:-1}" = 0 ] && [ "$(stat -c %s "$tmp")" -le "$max" ]; then\n' +
-    '    cat "$tmp"\n' +
+    '  sz=$(stat -Lc %s /proc/self/fd/5)\n' +
+    '  if [ "$ok" = 1 ] && [ "${rc:-1}" = 0 ] && [ "${sz:-0}" -le "$max" ]; then\n' +
+    '    head -c "$max" <&5\n' +
     '  else\n' +
     '    printf "[]"\n' +
     '  fi\n' +
+    '  exec 5<&-\n' +
     '  printf "\\n"\n' +
     'done\n'
 

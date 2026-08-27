@@ -75,12 +75,14 @@ QtObject {
     'export LC_ALL=C\n' +
     'dir="${XDG_CACHE_HOME:-$HOME/.cache}/omarchy/f1"\n' +
     'mkdir -p "$dir" || exit 1\n' +
+    // The cache is this user's alone; nothing else has business in it.
+    'chmod 700 "$dir" 2>/dev/null || true\n' +
     'name="$1"; url="$2"; timeout="$3"; ttl="$4"; max="$5"\n' +
     // The cache key carries API-supplied fields (circuit id, round, season),
     // so it is constrained rather than trusted: a value with a slash or a
     // leading dot-dot would otherwise name a file outside the cache dir.
     'case "$name" in\n' +
-    '  "" | *[!A-Za-z0-9._-]*) printf "MISS 0\\n"; exit 0 ;;\n' +
+    '  "" | "." | ".." | *[!A-Za-z0-9._-]*) printf "MISS 0\\n"; exit 0 ;;\n' +
     'esac\n' +
     'file="$dir/$name.json"\n' +
     // serve <file> <status>: emit the header and the body from ONE open
@@ -125,8 +127,15 @@ QtObject {
     // this process does not own exclusively is a file another local process
     // can pre-create, replace, or point elsewhere between our writes.
     'tmp=$(mktemp "$dir/.$name.XXXXXXXX") || exit 1\n' +
-    'rcf=$(mktemp "$dir/.$name.XXXXXXXX") || { rm -f "$tmp"; exit 1; }\n' +
-    'trap \'rm -f "$tmp" "$rcf"\' EXIT INT TERM\n' +
+    'trap \'rm -f "$tmp"\' EXIT INT TERM\n' +
+    // The download is written through a descriptor, never through the name.
+    // fd 4 is opened before curl runs and every byte lands in the object
+    // behind it; the pathname is touched again only for the rename, and only
+    // once the inode it denotes is confirmed to still be the one we wrote.
+    'exec 4> "$tmp" || exit 1\n' +
+    '[ -f /proc/self/fd/4 ] || exit 1\n' +
+    'tmpid=$(stat -Lc %d:%i /proc/self/fd/4) || exit 1\n' +
+    '[ "$tmpid" = "$(stat -c %d:%i "$tmp")" ] || exit 1\n' +
     // https only, on the first request and on every redirect, with a bounded
     // hop count — a 30x answer must not be able to walk this fetch onto
     // file://, onto a local address, or around a redirect loop.
@@ -136,23 +145,30 @@ QtObject {
     // is not stopped by it, and -o would have written the whole thing to disk
     // before any size check could run. head is the hard bound — it closes the
     // pipe after max+1 bytes, so at most that many bytes ever reach local
-    // storage no matter what the endpoint sends. Reading back one byte over
-    // the cap is how an oversized response is told apart from one that merely
-    // fills it. curl's own status goes to a file since $? after a pipeline
-    // belongs to head; without it a connection dropped mid-body would look
-    // like a complete answer and get cached as truncated JSON.
-    '{ curl -fsS -L --proto "=https" --proto-redir "=https" --max-redirs 3 \\\n' +
-    '       --max-filesize "$max" --max-time "$timeout" \\\n' +
-    '       -H "User-Agent: omarchy-f1-plugin/1.0" "$url" -o - 2>/dev/null\n' +
-    '  printf "%s" "$?" > "$rcf"\n' +
-    '} | head -c "$(( max + 1 ))" > "$tmp"\n' +
-    'rc=$(cat "$rcf" 2>/dev/null)\n' +
-    'if [ "${rc:-1}" = 0 ] && [ -s "$tmp" ] \\\n' +
-    '   && [ "$(stat -c %s "$tmp")" -le "$max" ]; then\n' +
-    '  if [ -L "$file" ]; then rm -f "$file"; fi\n' +
+    // storage no matter what the endpoint sends.
+    //
+    // curl's own exit status leaves on fd 3, which the command substitution
+    // aims back at its own stdout. $? after a pipeline belongs to head, and
+    // without curl's status a connection dropped mid-body would look like a
+    // complete answer and get cached as truncated JSON.
+    'rc=$({ { curl -fsS -L --proto "=https" --proto-redir "=https" --max-redirs 3 \\\n' +
+    '             --max-filesize "$max" --max-time "$timeout" \\\n' +
+    '             -H "User-Agent: omarchy-f1-plugin/1.0" "$url" -o - 2>/dev/null\n' +
+    '         printf "%s" "$?" >&3\n' +
+    '       } | head -c "$(( max + 1 ))" >&4\n' +
+    '     } 3>&1)\n' +
+    // The size is read off the descriptor that was written, before it closes.
+    // Reading back one byte over the cap is how an oversized response is told
+    // apart from one that merely fills it.
+    'sz=$(stat -Lc %s /proc/self/fd/4)\n' +
+    'exec 4>&-\n' +
+    'if [ "${rc:-1}" = 0 ] && [ "${sz:-0}" -gt 0 ] && [ "$sz" -le "$max" ] \\\n' +
+    '   && [ "$tmpid" = "$(stat -c %d:%i "$tmp")" ]; then\n' +
+    // rename(2) replaces whatever the target name denotes, a symlink
+    // included, and never writes through one.
     '  mv -f "$tmp" "$file" && status=FRESH\n' +
     'fi\n' +
-    'rm -f "$tmp" "$rcf"\n' +
+    'rm -f "$tmp"\n' +
     'serve "$file" "$status" || printf "MISS 0\\n"\n'
 
   function handle(raw) {
