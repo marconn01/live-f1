@@ -3,6 +3,7 @@ import Quickshell
 import Quickshell.Io
 import qs.Commons
 import qs.Ui
+import "F1Model.js" as F1Model
 
 // The bar pill.
 //
@@ -52,10 +53,23 @@ BarWidget {
     if (panelLoader.item) panelLoader.item.toggleLive()
   }
 
+  // The tooltip is built from names the calendar API supplied, and bar.run
+  // hands this whole string to `bash -lc`, so it gets the same treatment the
+  // scheduled notifications get in Notifier.send — for the same reason,
+  // spelled out in F1Model.notificationArg.
+  //
+  // shellQuote alone is not that treatment. It stops the text from breaking
+  // out of its quotes, which is the only thing it claims to do, and a quoted
+  // argument is still an argument: omarchy-notification-send hands any token
+  // it does not recognise straight to notify-send, and a race name beginning
+  // "--hint=string:omarchy-exec:" is then a click-to-run command attached to
+  // our own toast. notificationArg is what makes the text stop looking like
+  // an option in the first place.
   function announce() {
     if (!root.bar || !panelLoader.item) return
+    var text = F1Model.notificationArg(panelLoader.item.tooltipText, "Formula 1")
     root.bar.run("omarchy-notification-send --app-name 'Formula 1' 'Formula 1' "
-      + Util.shellQuote(panelLoader.item.tooltipText))
+      + Util.shellQuote(text))
   }
 
   // Shape contract for shell.summon/hide/toggle routing: Bar.findPanelWidget

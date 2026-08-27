@@ -83,15 +83,40 @@ QtObject {
     '  "" | *[!A-Za-z0-9._-]*) printf "MISS 0\\n"; exit 0 ;;\n' +
     'esac\n' +
     'file="$dir/$name.json"\n' +
-    // Only ever stat, serve, or replace a plain regular file of sane size. A
-    // symlink planted at this path would redirect the write onto the target
-    // it names, and a fifo would hang the read forever.
-    'usable() { [ ! -L "$1" ] && [ -f "$1" ] && [ -s "$1" ] && [ "$(stat -c %s "$1")" -le "$max" ]; }\n' +
-    'if usable "$file" && [ "$ttl" -gt 0 ]; then\n' +
-    '  age=$(( $(date +%s) - $(stat -c %Y "$file") ))\n' +
-    '  if [ "$age" -lt "$ttl" ]; then\n' +
-    '    printf "CACHE %s\\n" "$(stat -c %Y "$file")"\n' +
-    '    head -c "$max" "$file"\n' +
+    // serve <file> <status>: emit the header and the body from ONE open
+    // descriptor. Everything the decision rests on — is this a regular file,
+    // how big is it, when was it modified — is read back off /proc/self/fd,
+    // i.e. off the object we actually opened, never off the pathname. A
+    // process that swaps the path for a symlink, a fifo, or a huge file after
+    // we opened it cannot change what we are already reading, and a swap made
+    // before the open is caught by these checks. The timeout is the guard for
+    // the one thing a check cannot cover: open() on a fifo blocks until a
+    // writer shows up, which would otherwise wedge the widget forever.
+    'serve() {\n' +
+    "  timeout 10 sh -c '\n" +
+    '    exec 2>/dev/null\n' +
+    '    f=$1; st=$2; max=$3\n' +
+    '    exec 3< "$f" || exit 1\n' +
+    '    [ -f /proc/self/fd/3 ] || exit 1\n' +
+    // A descriptor remembers the file it opened, not how it was named, so the
+    // fd alone cannot say whether the path was a symlink. Comparing it against
+    // an lstat of the path recovers that: for a symlink the two identities
+    // differ (lstat describes the link, the fd describes its target), and so
+    // do they if anything swapped the path after the open. Both cases refuse.
+    '    [ "$(stat -Lc %d:%i /proc/self/fd/3)" = "$(stat -c %d:%i "$f")" ] || exit 1\n' +
+    '    sz=$(stat -Lc %s /proc/self/fd/3) || exit 1\n' +
+    '    [ "$sz" -gt 0 ] || exit 1\n' +
+    '    [ "$sz" -le "$max" ] || exit 1\n' +
+    '    printf "%s %s\\n" "$st" "$(stat -Lc %Y /proc/self/fd/3)"\n' +
+    '    head -c "$max" <&3\n' +
+    "  ' sh \"$1\" \"$2\" \"$max\"\n" +
+    '}\n' +
+    // The age test is only a hint about whether to spend a request; it reads
+    // the path, and that is fine because serve re-derives the mtime it
+    // reports from the descriptor it actually streams.
+    'if [ "$ttl" -gt 0 ] && [ ! -L "$file" ] && [ -f "$file" ]; then\n' +
+    '  now=$(date +%s); mtime=$(stat -c %Y "$file" 2>/dev/null || echo 0)\n' +
+    '  if [ "$(( now - mtime ))" -lt "$ttl" ] && serve "$file" CACHE; then\n' +
     '    exit 0\n' +
     '  fi\n' +
     'fi\n' +
@@ -100,26 +125,35 @@ QtObject {
     // this process does not own exclusively is a file another local process
     // can pre-create, replace, or point elsewhere between our writes.
     'tmp=$(mktemp "$dir/.$name.XXXXXXXX") || exit 1\n' +
-    'trap \'rm -f "$tmp"\' EXIT INT TERM\n' +
+    'rcf=$(mktemp "$dir/.$name.XXXXXXXX") || { rm -f "$tmp"; exit 1; }\n' +
+    'trap \'rm -f "$tmp" "$rcf"\' EXIT INT TERM\n' +
     // https only, on the first request and on every redirect, with a bounded
     // hop count — a 30x answer must not be able to walk this fetch onto
-    // file://, onto a local address, or around a redirect loop. --max-filesize
-    // stops the transfer itself; the stat is the backstop for a response that
-    // declares no length.
-    'if curl -fsS -L --proto "=https" --proto-redir "=https" --max-redirs 3 \\\n' +
-    '     --max-filesize "$max" --max-time "$timeout" \\\n' +
-    '     -H "User-Agent: omarchy-f1-plugin/1.0" "$url" -o "$tmp" 2>/dev/null \\\n' +
-    '   && [ -s "$tmp" ] && [ "$(stat -c %s "$tmp")" -le "$max" ]; then\n' +
+    // file://, onto a local address, or around a redirect loop.
+    //
+    // curl writes to a pipe, not to the file, because --max-filesize only
+    // acts on a length the server declares: a chunked or unlabelled response
+    // is not stopped by it, and -o would have written the whole thing to disk
+    // before any size check could run. head is the hard bound — it closes the
+    // pipe after max+1 bytes, so at most that many bytes ever reach local
+    // storage no matter what the endpoint sends. Reading back one byte over
+    // the cap is how an oversized response is told apart from one that merely
+    // fills it. curl's own status goes to a file since $? after a pipeline
+    // belongs to head; without it a connection dropped mid-body would look
+    // like a complete answer and get cached as truncated JSON.
+    '{ curl -fsS -L --proto "=https" --proto-redir "=https" --max-redirs 3 \\\n' +
+    '       --max-filesize "$max" --max-time "$timeout" \\\n' +
+    '       -H "User-Agent: omarchy-f1-plugin/1.0" "$url" -o - 2>/dev/null\n' +
+    '  printf "%s" "$?" > "$rcf"\n' +
+    '} | head -c "$(( max + 1 ))" > "$tmp"\n' +
+    'rc=$(cat "$rcf" 2>/dev/null)\n' +
+    'if [ "${rc:-1}" = 0 ] && [ -s "$tmp" ] \\\n' +
+    '   && [ "$(stat -c %s "$tmp")" -le "$max" ]; then\n' +
     '  if [ -L "$file" ]; then rm -f "$file"; fi\n' +
     '  mv -f "$tmp" "$file" && status=FRESH\n' +
     'fi\n' +
-    'rm -f "$tmp"\n' +
-    'if ! usable "$file"; then\n' +
-    '  printf "MISS 0\\n"\n' +
-    '  exit 0\n' +
-    'fi\n' +
-    'printf "%s %s\\n" "$status" "$(stat -c %Y "$file")"\n' +
-    'head -c "$max" "$file"\n'
+    'rm -f "$tmp" "$rcf"\n' +
+    'serve "$file" "$status" || printf "MISS 0\\n"\n'
 
   function handle(raw) {
     root.loading = false

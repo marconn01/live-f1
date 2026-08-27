@@ -72,8 +72,19 @@ function latestPerDriver(rows) {
     var at = F1Time.parseIso(row.date)
     var current = byDriver[key]
     if (!current || at === null || current.__at === null || at >= current.__at) {
+      // Copy field by field, skipping "__proto__". JSON.parse makes it a
+      // real own key, and `copy[k] = row[k]` on that key is an assignment to
+      // the prototype slot, not a field: it hands a feed row a prototype of
+      // the server's choosing. Nothing downstream reads a driver row through
+      // its prototype, so today that buys an attacker nothing they could not
+      // get by sending the field outright — but driverKey above exists
+      // because this object graph is built from a network response, and this
+      // is the same reasoning one level in.
       var copy = {}
-      for (var k in row) copy[k] = row[k]
+      for (var k in row) {
+        if (k === "__proto__") continue
+        copy[k] = row[k]
+      }
       copy.__at = at
       byDriver[key] = copy
     }

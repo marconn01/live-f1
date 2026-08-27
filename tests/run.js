@@ -660,6 +660,45 @@ check("every constructor in the live standings resolves to a colour", () => {
   }
 })
 
+check("a hostile race name cannot smuggle an option into the announce command", () => {
+  // BarWidget.announce() builds a shell command for bar.run, which runs it
+  // under `bash -lc`. Util.shellQuote stops the text from breaking out of its
+  // quotes, but a quoted argument is still an argument, and
+  // omarchy-notification-send passes any token it does not recognise straight
+  // through to notify-send. A race name beginning "--hint=string:omarchy-exec:"
+  // therefore used to arrive as a click-to-run command on our own toast.
+  const shellQuote = (v) => "'" + String(v || "").replace(/'/g, "'\\''") + "'"
+  const payloads = [
+    "--hint=string:omarchy-exec:touch /tmp/pwned #",
+    "   --hint=string:omarchy-exec:touch /tmp/pwned #",
+    "--exec",
+    "--app-name=Bank of Somewhere",
+    "-u critical"
+  ]
+  for (const payload of payloads) {
+    const tooltip = `${payload} · Race 14:00 (in 2h)`
+    const arg = F1Model.notificationArg(tooltip, "Formula 1")
+    assert(!arg.startsWith("-"), `still option-shaped: ${arg}`)
+    const command =
+      "omarchy-notification-send --app-name 'Formula 1' 'Formula 1' " + shellQuote(arg)
+    // Nothing after the headline may look like an option to either program.
+    assert(!/ '-/.test(command), `option token survived quoting: ${command}`)
+  }
+})
+
+check("a feed row cannot choose a driver row's prototype", () => {
+  // JSON.parse turns "__proto__" into a real own key, so copying a row field
+  // by field would otherwise assign through the prototype slot.
+  const hostile =
+    '[{"driver_number":1,"date":"2026-08-23T13:00:00+00:00","position":1,' +
+    '"__proto__":{"polluted":"yes"}}]'
+  const row = F1Live.mergeLatest({}, hostile)["1"]
+  equal(row.position, 1)
+  equal(row.polluted, undefined, "row inherited from an attacker-chosen prototype")
+  assert(Object.getPrototypeOf(row) === Object.prototype, "prototype was replaced")
+  equal({}.polluted, undefined, "Object.prototype was polluted")
+})
+
 // --------------------------------------------------------------------- report
 
 console.log(`\n${passed} passed, ${failures.length} failed`)

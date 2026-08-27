@@ -177,29 +177,53 @@ QtObject {
   // Fetch each "name=url" argument in turn, printing a marker before each body.
   // One process, one set of TLS handshakes, one exit to handle.
   //
-  // Bodies land in a private temporary file rather than straight on stdout:
-  // that is what makes both the byte cap and the "[]" fallback for a failed
-  // request possible, since a pipeline would report the exit status of the cap
-  // instead of the one from curl.
+  // Each body goes through `head` into a private temporary file rather than
+  // straight down curl's -o. --max-filesize only refuses a length the server
+  // declares up front, so a chunked or unlabelled response walks straight past
+  // it and -o would spool all of it to disk before anything could measure it;
+  // head closes the pipe at the cap instead, which is a bound the far end
+  // cannot talk its way around. The file is still what makes the "[]" fallback
+  // possible: $? after a pipeline belongs to head, so curl's own status is
+  // parked in a second file, and without it a connection dropped mid-body
+  // would be indistinguishable from a complete answer.
   readonly property string batchScript:
     'set -u\n' +
+    'export LC_ALL=C\n' +
     'max=$1; shift\n' +
     'tmp=$(mktemp) || exit 1\n' +
-    'trap \'rm -f "$tmp"\' EXIT INT TERM\n' +
+    'rcf=$(mktemp) || { rm -f "$tmp"; exit 1; }\n' +
+    'trap \'rm -f "$tmp" "$rcf"\' EXIT INT TERM\n' +
     'for spec in "$@"; do\n' +
     '  name=${spec%%=*}\n' +
     '  url=${spec#*=}\n' +
     '  printf "===%s===\\n" "$name"\n' +
     // No -L: these are fixed https endpoints, and a redirect off them is
     // nothing this plugin should follow.
-    '  if curl -fsS --proto "=https" --max-filesize "$max" --max-time 10 \\\n' +
-    '       -H "User-Agent: omarchy-f1-plugin/1.0" "$url" -o "$tmp"; then\n' +
-    '    head -c "$max" "$tmp"\n' +
+    '  { curl -fsS --proto "=https" --max-filesize "$max" --max-time 10 \\\n' +
+    '         -H "User-Agent: omarchy-f1-plugin/1.0" "$url" -o - 2>/dev/null\n' +
+    '    printf "%s" "$?" > "$rcf"\n' +
+    '  } | head -c "$(( max + 1 ))" > "$tmp"\n' +
+    // One byte over the cap is how an oversized body is told apart from one
+    // that merely fills it; either way the round trip degrades to "[]".
+    '  rc=$(cat "$rcf" 2>/dev/null)\n' +
+    '  if [ "${rc:-1}" = 0 ] && [ "$(stat -c %s "$tmp")" -le "$max" ]; then\n' +
+    '    cat "$tmp"\n' +
     '  else\n' +
     '    printf "[]"\n' +
     '  fi\n' +
     '  printf "\\n"\n' +
     'done\n'
+
+  // The probe is a single fixed endpoint, but it is the same story: curl
+  // straight into a StdioCollector has no ceiling at all, so it goes through
+  // the same hard byte cap. A failed request yields no output, which
+  // applyProbe already reads as "nothing known yet".
+  readonly property string probeScript:
+    'set -u\n' +
+    'curl -fsS --proto "=https" --max-filesize "$1" --max-time 8 \\\n' +
+    '  -H "User-Agent: omarchy-f1-plugin/1.0" \\\n' +
+    '  "https://api.openf1.org/v1/sessions?session_key=latest" 2>/dev/null \\\n' +
+    '  | head -c "$1"\n'
 
   // Rebuild the tower from whatever state has accumulated. Called after every
   // poll of either cadence, so the roster arriving a minute after the first
@@ -283,10 +307,8 @@ QtObject {
 
   property Process probeProc: Process {
     id: probeProc
-    command: ["curl", "-fsS", "--proto", "=https",
-      "--max-filesize", String(root.maxBytes), "--max-time", "8",
-      "-H", "User-Agent: omarchy-f1-plugin/1.0",
-      "https://api.openf1.org/v1/sessions?session_key=latest"]
+    command: ["sh", "-c", root.probeScript, "omarchy-f1-live",
+      String(root.maxBytes)]
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: root.applyProbe(text)
