@@ -18,7 +18,7 @@ Click it for the dashboard. It turns your theme's active colour while a
 session is running.
 
 <p align="center">
-  <img src="docs/preview.png" alt="The Formula 1 panel: next race, weekend schedule, upcoming races, and driver standings" width="480">
+  <img src="preview.png" alt="The Formula 1 panel: next race, weekend schedule, upcoming races, and driver standings" width="480">
 </p>
 
 ## Install
