@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "nocram.f1",
   "name": "F1 Live",
-  "version": "1.0.0",
+  "version": "1.2.0",
   "author": "nocram",
   "license": "MIT",
   "description": "Live F1 in the Omarchy bar: a live timing tower while a session is running, live driver standings carrying the points gap from your pinned driver (Max Verstappen by default) to the championship leader, plus the next Grand Prix countdown and the full weekend schedule in your local timezone.",
