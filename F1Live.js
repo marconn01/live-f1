@@ -199,6 +199,60 @@ function buildGrid(driversByNumber, positions, intervals, pitsByDriver) {
   return rows
 }
 
+// A poll that failed carries the reason back in place of the body. OpenF1 now
+// answers 401 to everything while a session is running unless the caller is
+// authenticated, and a 401 rendered as an empty grid is indistinguishable
+// from a quiet track — which is exactly the wrong thing to show at 200mph.
+function feedError(raw) {
+  var text = String(raw || "").replace(/^\s+|\s+$/g, "")
+  if (text.indexOf('"openf1_error"') < 0) return null
+  try {
+    var parsed = JSON.parse(text)
+    if (!parsed || !parsed.openf1_error) return null
+    var http = parseInt(parsed.http, 10)
+    var curl = parseInt(parsed.curl, 10)
+    return { http: isFinite(http) ? http : 0, curl: isFinite(curl) ? curl : 0 }
+  } catch (e) {
+    return null
+  }
+}
+
+// The first section of a batched response that came back as a failure. One
+// message is worth showing; six copies of it are not.
+function firstFeedError(sections) {
+  for (var i = 0; i < sections.length; i++) {
+    var err = feedError(sections[i])
+    if (err) return err
+  }
+  return null
+}
+
+// Whether the poller had credentials, and whether they worked. Reported by the
+// shell prelude so the message below can tell "not set up" apart from
+// "rejected" — two problems with completely different fixes.
+function authState(raw) {
+  var value = String(raw || "").replace(/^\s+|\s+$/g, "")
+  return (value === "ok" || value === "failed") ? value : "none"
+}
+
+// What to actually put in front of the user. Every branch names the thing they
+// would have to change; none of them is "an error occurred".
+function feedErrorMessage(err, state) {
+  if (!err) return ""
+  var http = err.http
+  if (http === 401 || http === 403) {
+    if (state === "ok")
+      return "OpenF1 refused this account's live access (HTTP " + http + ")."
+    if (state === "failed")
+      return "OpenF1 rejected these credentials — check client_id and client_secret in ~/.config/omarchy/f1/credentials."
+    return "OpenF1 restricts every endpoint to paid accounts while a session is running. Add credentials to ~/.config/omarchy/f1/credentials for live timing."
+  }
+  if (http === 429) return "OpenF1 is rate-limiting this client — backing off."
+  if (http >= 500) return "OpenF1 is unavailable right now (HTTP " + http + ")."
+  if (http > 0) return "OpenF1 returned HTTP " + http + "."
+  return "Live feed unreachable."
+}
+
 // Most recent meaningful race-control state. Flags are the truth about whether
 // the race is green, neutralised, or stopped, and the label is always text —
 // never a bare colour — so the state is readable without seeing the tint.
@@ -253,6 +307,10 @@ if (typeof module !== "undefined") {
     parseDrivers: parseDrivers,
     parsePits: parsePits,
     currentLap: currentLap,
+    feedError: feedError,
+    firstFeedError: firstFeedError,
+    authState: authState,
+    feedErrorMessage: feedErrorMessage,
     formatGap: formatGap,
     buildGrid: buildGrid,
     sessionStatus: sessionStatus,

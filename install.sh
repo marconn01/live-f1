@@ -19,6 +19,10 @@ target_dir="${XDG_CONFIG_HOME:-$HOME/.config}/omarchy/plugins/$id"
 # put the machine back exactly as it found it.
 cache_dir="${XDG_CACHE_HOME:-$HOME/.cache}/omarchy/f1"
 state_dir="${XDG_STATE_HOME:-$HOME/.local/state}/omarchy/f1"
+# OpenF1 credentials, if the user set up live timing. Deliberately NOT in the
+# list below: they were typed in by hand and are not this script's to throw
+# away on an uninstall.
+config_dir="${XDG_CONFIG_HOME:-$HOME/.config}/omarchy/f1"
 mode="copy"
 keep_data="no"
 
@@ -59,6 +63,9 @@ if [[ $mode == remove ]]; then
         echo "removed $dir"
       fi
     done
+  fi
+  if [[ -e $config_dir/credentials ]]; then
+    echo "kept $config_dir/credentials — delete it yourself if you want it gone"
   fi
   rescan
   exit 0
