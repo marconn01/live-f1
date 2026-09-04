@@ -10,6 +10,7 @@
 
 const fs = require("fs")
 const path = require("path")
+const os = require("os")
 const { execFileSync, spawnSync } = require("child_process")
 
 // Pin the harness to UTC. The formatters deliberately read the host's local
@@ -45,6 +46,24 @@ const F1Time = load("F1Time.js")
 const F1Model = load("F1Model.js", { F1Time })
 const F1Live = load("F1Live.js", { F1Time })
 const F1Teams = load("F1Teams.js")
+const OpenF1Auth = load("OpenF1Auth.js")
+
+// The shell scripts are built as JS string expressions inside QML properties.
+// They are where a failed request is turned into something the panel can
+// render, so the tests below run the real generated text rather than a copy.
+function qmlScript(file, property) {
+  const text = fs.readFileSync(path.join(ROOT, file), "utf8")
+  const at = text.indexOf(`readonly property string ${property}:`)
+  if (at < 0) throw new Error(`no ${property} in ${file}`)
+  const lines = []
+  for (const line of text.slice(text.indexOf("\n", at) + 1).split("\n")) {
+    const trimmed = line.trim()
+    if (trimmed === "" || trimmed.startsWith("//")) continue
+    if (!/^['"]|^OpenF1Auth\./.test(trimmed)) break
+    lines.push(line)
+  }
+  return new Function("OpenF1Auth", `return (${lines.join("\n")})`)(OpenF1Auth)
+}
 
 // ------------------------------------------------------------------ fixtures
 
@@ -697,6 +716,109 @@ check("a feed row cannot choose a driver row's prototype", () => {
   equal(row.polluted, undefined, "row inherited from an attacker-chosen prototype")
   assert(Object.getPrototypeOf(row) === Object.prototype, "prototype was replaced")
   equal({}.polluted, undefined, "Object.prototype was polluted")
+})
+
+// ------------------------------------------------------- OpenF1 lockout
+
+// OpenF1 now answers 401 to every endpoint — historical ones included — for
+// the whole duration of a live session unless the caller is authenticated.
+// The plugin used to turn that into "[]", which reached the panel as an empty
+// timing tower: the one failure that looks exactly like a quiet racetrack.
+
+check("a refused poll is reported as a refusal, not as no data", () => {
+  const body = '{"openf1_error":1,"http":401,"curl":22}'
+  const err = F1Live.feedError(body)
+  assert(err !== null, "a 401 body parsed as nothing to report")
+  equal(err.http, 401)
+  // And it must not also arrive as rows, or it would merge into the grid.
+  equal(F1Live.safeRows(body).length, 0)
+})
+
+check("a curl-level failure carries no bogus status", () => {
+  // curl reports "000" when it never got an HTTP answer; the shell normalizes
+  // it, because a leading zero is not valid JSON and would make the error
+  // report itself unparseable.
+  const err = F1Live.feedError('{"openf1_error":1,"http":0,"curl":6}')
+  equal(err.http, 0)
+  equal(F1Live.feedErrorMessage(err, "none"), "Live feed unreachable.")
+})
+
+check("real feed bodies are never mistaken for errors", () => {
+  equal(F1Live.feedError("[]"), null)
+  equal(F1Live.feedError(""), null)
+  equal(F1Live.feedError("{not json"), null)
+  equal(F1Live.feedError(fixture("openf1-position.json")), null)
+})
+
+check("the lockout message names what the user has to change", () => {
+  const err = { http: 401, curl: 22 }
+  const unset = F1Live.feedErrorMessage(err, "none")
+  const rejected = F1Live.feedErrorMessage(err, "failed")
+  assert(unset !== rejected, "not configured reads the same as rejected")
+  for (const message of [unset, rejected])
+    assert(/credentials/.test(message), `no actionable noun: ${message}`)
+  assert(/rate-limit/.test(F1Live.feedErrorMessage({ http: 429, curl: 22 }, "ok")))
+})
+
+check("firstFeedError reports one problem, not one per endpoint", () => {
+  const err = '{"openf1_error":1,"http":401,"curl":22}'
+  equal(F1Live.firstFeedError([err, err, err]).http, 401)
+  equal(F1Live.firstFeedError(["[]", "[]"]), null)
+  equal(F1Live.firstFeedError(["[]", err]).http, 401)
+})
+
+check("authState only ever reports one of three known words", () => {
+  equal(F1Live.authState("ok\n"), "ok")
+  equal(F1Live.authState("  failed  "), "failed")
+  equal(F1Live.authState("anything else"), "none")
+  equal(F1Live.authState(""), "none")
+})
+
+// ------------------------------------------------------- generated shell
+
+check("the generated shell scripts parse", () => {
+  for (const [file, property] of [
+    ["LiveService.qml", "batchScript"],
+    ["CachedFetch.qml", "script"]
+  ]) {
+    const script = qmlScript(file, property)
+    const result = spawnSync("sh", ["-n"], { input: script, encoding: "utf8" })
+    equal(result.status, 0, `${file}:${property} — ${result.stderr}`)
+  }
+})
+
+check("an OpenF1 token is never offered to any other host", () => {
+  // CachedFetch fetches jolpica through the same script that fetches OpenF1,
+  // so the decision has to be made per URL rather than once per process.
+  const probe =
+    OpenF1Auth.PRELUDE +
+    'OPENF1_AUTH=/would/be/the/token\nof1_loaded=1\n' +
+    'for u in "$@"; do printf "%s\\n" "$(of1_auth_for "$u")"; done\n'
+  const result = spawnSync("sh", ["-c", probe, "test",
+    "https://api.openf1.org/v1/position?session_key=latest",
+    "https://api.jolpi.ca/ergast/f1/current/races/",
+    "https://api.openf1.org.evil.example/v1/position",
+    "http://api.openf1.org/v1/position"
+  ], { encoding: "utf8" })
+  equal(result.status, 0, result.stderr)
+  equal(result.stdout.trim(),
+    ["/would/be/the/token", "/dev/null", "/dev/null", "/dev/null"].join("\n"))
+})
+
+check("with no credentials the auth prelude makes no request at all", () => {
+  const probe =
+    OpenF1Auth.PRELUDE +
+    'of1_auth_for "https://api.openf1.org/v1/position" >/dev/null\n' +
+    'printf "%s %s\\n" "$OPENF1_AUTH_STATE" "$OPENF1_AUTH"\n'
+  const result = spawnSync("sh", ["-c", probe, "test"], {
+    encoding: "utf8",
+    // A config directory that cannot hold credentials, and a PATH with no
+    // curl in it: if the prelude tried to mint a token this would show up.
+    env: { ...process.env, HOME: os.tmpdir(), XDG_CONFIG_HOME: os.tmpdir(),
+           XDG_STATE_HOME: os.tmpdir(), OPENF1_CLIENT_ID: "", OPENF1_CLIENT_SECRET: "" }
+  })
+  equal(result.status, 0, result.stderr)
+  equal(result.stdout.trim(), "none /dev/null")
 })
 
 // --------------------------------------------------------------------- report

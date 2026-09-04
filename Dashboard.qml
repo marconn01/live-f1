@@ -823,6 +823,18 @@ Panel {
 
         Text {
           width: parent.width
+          visible: root.live.lastError !== ""
+          text: root.live.lastError
+          color: Color.urgent
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.caption
+          leftPadding: Style.space(4)
+          rightPadding: Style.space(4)
+          wrapMode: Text.WordWrap
+        }
+
+        Text {
+          width: parent.width
           text: "Turn live mode off to return to the race overview."
           color: root.dimmer
           font.family: root.fontFamily
@@ -913,6 +925,8 @@ Panel {
           font.family: root.fontFamily
           font.pixelSize: Style.font.caption
           leftPadding: Style.space(4)
+          rightPadding: Style.space(4)
+          wrapMode: Text.WordWrap
         }
 
         PanelSeparator { width: parent.width }
@@ -969,11 +983,18 @@ Panel {
         Text {
           width: parent.width
           visible: !root.live.hasData
-          text: root.live.polling ? "Waiting for the first timing update…" : "No timing data available yet."
+          // "No timing data" is a claim about the track. It is only honest
+          // when the feed actually answered us; when it refused, the message
+          // above it is the truth and this must not contradict it.
+          text: root.live.lockedOut ? "Live timing is locked behind an OpenF1 account."
+            : root.live.polling ? "Waiting for the first timing update…"
+            : "No timing data available yet."
           color: root.dim
           font.family: root.fontFamily
           font.pixelSize: Style.font.bodySmall
           leftPadding: Style.space(4)
+          rightPadding: Style.space(4)
+          wrapMode: Text.WordWrap
         }
 
         Column {

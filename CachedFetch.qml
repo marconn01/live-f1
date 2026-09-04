@@ -1,6 +1,7 @@
 import QtQuick
 import Quickshell
 import Quickshell.Io
+import "OpenF1Auth.js" as OpenF1Auth
 
 // One network resource, cached on disk, with offline fallback.
 //
@@ -73,6 +74,11 @@ QtObject {
   readonly property string script:
     'set -u\n' +
     'export LC_ALL=C\n' +
+    // The OpenF1 sessions list goes through here too, and it is refused like
+    // everything else on that host while a session is running. of1_auth_for
+    // decides per URL, so the bearer token reaches OpenF1 and nothing else —
+    // this same script also fetches jolpica.
+    OpenF1Auth.PRELUDE +
     'dir="${XDG_CACHE_HOME:-$HOME/.cache}/omarchy/f1"\n' +
     'mkdir -p "$dir" || exit 1\n' +
     // The cache is this user's alone; nothing else has business in it.
@@ -153,7 +159,10 @@ QtObject {
     // complete answer and get cached as truncated JSON.
     'rc=$({ { curl -fsS -L --proto "=https" --proto-redir "=https" --max-redirs 3 \\\n' +
     '             --max-filesize "$max" --max-time "$timeout" \\\n' +
-    '             -H "User-Agent: omarchy-f1-plugin/1.0" "$url" -o - 2>/dev/null\n' +
+    '             -H "User-Agent: omarchy-f1-plugin/1.0" \\\n' +
+    // curl drops a custom Authorization header when a redirect crosses to
+    // another host, so following one cannot carry the token off OpenF1.
+    '             -H "@$(of1_auth_for "$url")" "$url" -o - 2>/dev/null\n' +
     '         printf "%s" "$?" >&3\n' +
     '       } | head -c "$(( max + 1 ))" >&4\n' +
     '     } 3>&1)\n' +

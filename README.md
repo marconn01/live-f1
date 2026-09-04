@@ -60,6 +60,8 @@ Nothing outside your home directory, and nothing needs root:
 | `~/.config/omarchy/plugins/nocram.f1` | the plugin itself |
 | `~/.cache/omarchy/f1` | cached API responses, so the panel opens instantly and still works offline |
 | `~/.local/state/omarchy/f1/notified.json` | which notifications have already fired, so a restart cannot repeat one |
+| `~/.local/state/omarchy/f1/openf1.auth` | the cached OpenF1 bearer token, `0600`, only if you set up live access |
+| `~/.config/omarchy/f1/credentials` | your OpenF1 client id and secret, if you created it — see below |
 
 `./install.sh --remove` deletes all three (add `--keep-data` to keep the cache
 and state). `omarchy plugin remove nocram.f1` removes only the plugin
@@ -206,10 +208,55 @@ Nothing is hardcoded — no dates, no standings, no driver positions.
 | Exact session start/end times, live timing | [OpenF1](https://openf1.org) |
 | Circuit maps | shipped with the plugin in `circuits/` — SVG layouts from [julesr0y/f1-circuits-svg](https://github.com/julesr0y/f1-circuits-svg), matched to the round by circuit id |
 
-Both APIs are free, public, and need no key. They sit behind
-`DataService.qml` and `LiveService.qml`, with all parsing isolated in pure
-JS modules, so replacing a provider means rewriting those files and nothing
-else.
+They sit behind `DataService.qml` and `LiveService.qml`, with all parsing
+isolated in pure JS modules, so replacing a provider means rewriting those
+files and nothing else.
+
+### Live timing needs an OpenF1 account
+
+Jolpica is free and needs no key. OpenF1 is free for historical data, but as of
+the 2026 season it refuses **every** endpoint — the historical ones included —
+for as long as a session is actually running:
+
+```
+HTTP 401
+{"detail":"Live F1 session in progress. Global API access (including past
+ sessions) is restricted to authenticated users until the session ends."}
+```
+
+So the timing tower needs a paid OpenF1 account, or it will be empty for
+exactly the ninety minutes you wanted it. Everything else in the panel — the
+countdown, the weekend schedule, the standings, the circuit map, the
+qualifying grid — is unaffected: it comes from Jolpica, and the session
+schedule is served from cache while OpenF1 is closed.
+
+To enable live timing, get credentials from [openf1.org](https://openf1.org)
+and write them where the plugin looks:
+
+```bash
+mkdir -p ~/.config/omarchy/f1
+cat > ~/.config/omarchy/f1/credentials <<'EOF'
+client_id=your-client-id
+client_secret=your-client-secret
+EOF
+chmod 600 ~/.config/omarchy/f1/credentials
+```
+
+`$OPENF1_CLIENT_ID` and `$OPENF1_CLIENT_SECRET` in the shell's environment work
+too, and take precedence. Either way the plugin exchanges them at
+`POST /token` for a bearer token, caches it in
+`~/.local/state/omarchy/f1/openf1.auth` until a minute before it expires, and
+sends it to `api.openf1.org` and to no other host.
+
+The credentials never enter QML, never land in the plugin's settings, and never
+appear in any process's argument list — `/proc/PID/cmdline` is world-readable,
+so they travel from your `0600` file to curl through another `0600` file
+instead (`curl --data-urlencode name@file` and `curl -H @file`). Both files are
+deleted as soon as curl exits.
+
+Without credentials nothing is different from before: no token request is ever
+made, and the panel says plainly why the tower is empty instead of showing a
+blank grid.
 
 ## Caching and offline behaviour
 
@@ -232,6 +279,10 @@ flag stops every timer. Each tick is a single subprocess batching the feeds
 that change per second; a slower one-a-minute tick batches those that don't.
 Requests are windowed at both ends and merged into accumulated state, so a
 tick stays a few hundred rows however long the race has been running.
+
+If OpenF1 answers `401`, the fast tick drops to once a minute: there is nothing
+a faster poll can win against a deliberate refusal, and it still picks live
+timing back up the moment credentials appear or the session ends.
 
 ## Notifications
 

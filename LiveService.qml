@@ -2,6 +2,7 @@ import QtQuick
 import Quickshell
 import Quickshell.Io
 import "F1Live.js" as F1Live
+import "OpenF1Auth.js" as OpenF1Auth
 import "F1Model.js" as F1Model
 import "F1Time.js" as F1Time
 
@@ -49,6 +50,14 @@ QtObject {
   property bool polling: false
   property string lastError: ""
   property int consecutiveFailures: 0
+
+  // What the last poll's HTTP answer was, and whether the poller had working
+  // credentials when it asked. OpenF1 now answers 401 to every endpoint while
+  // a session is running unless the caller is authenticated, so these two are
+  // the difference between "the track is quiet" and "we are locked out".
+  property int feedHttpStatus: 0
+  property string authState: "none"
+  readonly property bool lockedOut: feedHttpStatus === 401 || feedHttpStatus === 403
 
   // OpenF1's own view of what is running, used as a backstop when a session
   // over- or under-runs its published schedule.
@@ -134,6 +143,7 @@ QtObject {
     status = ({ label: "RUNNING", kind: "green", messageAt: null })
     consecutiveFailures = 0
     lastError = ""
+    feedHttpStatus = 0
   }
 
   function refreshNow() {
@@ -183,7 +193,15 @@ QtObject {
   readonly property string batchScript:
     'set -u\n' +
     'export LC_ALL=C\n' +
+    OpenF1Auth.PRELUDE +
     'max=$1; shift\n' +
+    // Every URL here is OpenF1's, so credentials are resolved up front rather
+    // than lazily, and the outcome is reported before any body: the panel then
+    // knows whether a refusal below means "no credentials configured" or "the
+    // ones you configured were rejected" — two problems, two different fixes.
+    'of1_auth_load >/dev/null 2>&1 || true\n' +
+    'of1_loaded=1\n' +
+    'printf "===auth===\\n%s\\n" "$OPENF1_AUTH_STATE"\n' +
     'for spec in "$@"; do\n' +
     '  name=${spec%%=*}\n' +
     '  url=${spec#*=}\n' +
@@ -213,34 +231,47 @@ QtObject {
     // exit status leaves on fd 3 — $? after a pipeline belongs to head, and
     // without it a connection dropped mid-body would be indistinguishable
     // from a complete answer.
-    '  rc=$({ { curl -fsS --proto "=https" --max-filesize "$max" --max-time 10 \\\n' +
-    '               -H "User-Agent: omarchy-f1-plugin/1.0" "$url" -o - 2>/dev/null\n' +
+    //
+    // The HTTP status comes back too, on the same descriptor. Without it every
+    // failure looked identical from QML — and they are not remotely alike:
+    // OpenF1 answers 401 to EVERY endpoint while a session is running unless
+    // the caller is authenticated, and collapsing that into "[]" is what made
+    // a locked-out poller look like an empty racetrack. -w writes the status
+    // to stderr, which is why -S goes: with -f and no -S, curl's stderr
+    // carries the status and nothing else.
+    '  out=$({ { curl -fs --proto "=https" --max-filesize "$max" --max-time 10 \\\n' +
+    '               -H "User-Agent: omarchy-f1-plugin/1.0" \\\n' +
+    '               -H "@$(of1_auth_for "$url")" \\\n' +
+    '               -w "%{stderr}%{http_code} " "$url" -o - 2>&3\n' +
     '           printf "%s" "$?" >&3\n' +
     '         } | head -c "$(( max + 1 ))" >&4\n' +
     '       } 3>&1)\n' +
     '  exec 4>&-\n' +
+    '  http=${out%% *}; rc=${out##* }\n' +
+    // curl reports "000" when it never got an HTTP answer at all, and a
+    // leading zero is not valid JSON — it would make the error report itself
+    // unparseable, which is how this whole class of failure stayed invisible
+    // in the first place. No real status begins with a zero.
+    '  case "$http" in "" | *[!0-9]*) http=0 ;; 0*) http=0 ;; esac\n' +
+    '  case "$rc" in "" | *[!0-9]*) rc=1 ;; esac\n' +
     // One byte over the cap is how an oversized body is told apart from one
-    // that merely fills it; either way the round trip degrades to "[]".
+    // that merely fills it. Either way, and for every other failure too, what
+    // goes out in place of the body is a report of what went wrong.
     '  sz=$(stat -Lc %s /proc/self/fd/5)\n' +
-    '  if [ "$ok" = 1 ] && [ "${rc:-1}" = 0 ] && [ "${sz:-0}" -le "$max" ]; then\n' +
+    '  if [ "$ok" = 1 ] && [ "$rc" = 0 ] && [ "${sz:-0}" -le "$max" ]; then\n' +
     '    head -c "$max" <&5\n' +
     '  else\n' +
-    '    printf "[]"\n' +
+    '    printf "{\\"openf1_error\\":1,\\"http\\":%s,\\"curl\\":%s}" "$http" "$rc"\n' +
     '  fi\n' +
     '  exec 5<&-\n' +
     '  printf "\\n"\n' +
     'done\n'
 
-  // The probe is a single fixed endpoint, but it is the same story: curl
-  // straight into a StdioCollector has no ceiling at all, so it goes through
-  // the same hard byte cap. A failed request yields no output, which
-  // applyProbe already reads as "nothing known yet".
-  readonly property string probeScript:
-    'set -u\n' +
-    'curl -fsS --proto "=https" --max-filesize "$1" --max-time 8 \\\n' +
-    '  -H "User-Agent: omarchy-f1-plugin/1.0" \\\n' +
-    '  "https://api.openf1.org/v1/sessions?session_key=latest" 2>/dev/null \\\n' +
-    '  | head -c "$1"\n'
+  // The probe is one fixed endpoint, so it goes through the same batch script
+  // as everything else rather than keeping a second copy of the byte cap, the
+  // auth prelude and the status plumbing that would then drift out of step.
+  readonly property string probeUrl:
+    "https://api.openf1.org/v1/sessions?session_key=latest"
 
   // Rebuild the tower from whatever state has accumulated. Called after every
   // poll of either cadence, so the roster arriving a minute after the first
@@ -253,6 +284,19 @@ QtObject {
   function applyFast(text) {
     root.polling = false
     root.lastPollAt = Date.now()
+    root.authState = F1Live.authState(section(text, "auth"))
+
+    // A refused poll carries no timing at all, so it must not be folded into
+    // the accumulated state and must not be reported as a quiet track. The
+    // last good grid stays on screen underneath the message.
+    var problem = F1Live.firstFeedError([section(text, "position"), section(text, "intervals")])
+    if (problem) {
+      root.feedHttpStatus = problem.http
+      root.consecutiveFailures = root.consecutiveFailures + 1
+      root.lastError = F1Live.feedErrorMessage(problem, root.authState)
+      return
+    }
+    root.feedHttpStatus = 0
 
     root.positionState = F1Live.mergeLatest(root.positionState, section(text, "position"))
     root.intervalState = F1Live.mergeLatest(root.intervalState, section(text, "intervals"))
@@ -273,6 +317,14 @@ QtObject {
   }
 
   function applySlow(text) {
+    root.authState = F1Live.authState(section(text, "auth"))
+    // Same reasoning as applyFast, and it matters more here: parsePits on a
+    // refusal returns an empty tally, which would silently reset every
+    // driver's stop count to zero mid-race.
+    if (F1Live.firstFeedError([section(text, "drivers"), section(text, "pit"),
+                               section(text, "race_control"), section(text, "laps")]))
+      return
+
     var drivers = F1Live.parseDrivers(section(text, "drivers"))
     // Keep the previous roster if a poll comes back empty — losing it would
     // strip every name and colour off a grid that is otherwise fine.
@@ -296,8 +348,25 @@ QtObject {
   }
 
   function applyProbe(text) {
-    var parsed = F1Model.parseOpenF1Sessions(text)
-    root.probedSession = parsed.length > 0 ? parsed[parsed.length - 1] : null
+    root.authState = F1Live.authState(section(text, "auth"))
+
+    var body = section(text, "sessions")
+    var problem = F1Live.feedError(body)
+    if (problem) {
+      // A refused probe says nothing about what is on track, so the last
+      // answer stands. Nulling it here would retire the very backstop that
+      // covers a session running past its published end.
+      root.feedHttpStatus = problem.http
+      if (!root.polls) root.lastError = F1Live.feedErrorMessage(problem, root.authState)
+      return
+    }
+
+    var parsed = F1Model.parseOpenF1Sessions(body)
+    if (parsed.length > 0) root.probedSession = parsed[parsed.length - 1]
+    if (!root.polls) {
+      root.feedHttpStatus = 0
+      root.lastError = ""
+    }
   }
 
   // ------------------------------------------------------------ processes
@@ -310,7 +379,9 @@ QtObject {
     }
     onExited: function(code) {
       root.polling = false
-      if (code !== 0) root.lastError = "live feed unreachable"
+      // The script itself only fails if the shell or mktemp does; every
+      // network outcome is reported in the body, with its status.
+      if (code !== 0) root.lastError = "live feed pipeline exited " + code
     }
   }
 
@@ -324,8 +395,8 @@ QtObject {
 
   property Process probeProc: Process {
     id: probeProc
-    command: ["sh", "-c", root.probeScript, "omarchy-f1-live",
-      String(root.maxBytes)]
+    command: ["sh", "-c", root.batchScript, "omarchy-f1-live",
+      String(root.maxBytes), "sessions=" + root.probeUrl]
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: root.applyProbe(text)
@@ -335,7 +406,11 @@ QtObject {
   // ------------------------------------------------------------ timers
 
   property Timer fastTimer: Timer {
-    interval: Math.max(5, root.refreshSeconds) * 1000
+    // Once OpenF1 has said 401 there is nothing a faster tick can win, so the
+    // cadence drops to a minute: enough to pick up access the moment the
+    // session ends or credentials are added, without hammering an endpoint
+    // that is refusing us on purpose.
+    interval: (root.lockedOut ? 60 : Math.max(5, root.refreshSeconds)) * 1000
     running: root.polls
     repeat: true
     triggeredOnStart: true
