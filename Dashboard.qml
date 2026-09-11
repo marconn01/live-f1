@@ -197,7 +197,13 @@ Panel {
   }
 
   function setCenterHoverRevealSuppressed(value) {
-    if (root.bar && "centerHoverRevealSuppressed" in root.bar)
+    // Omarchy 4.0.3 hands third-party widgets the PluginBarApi facade, where
+    // centerHoverRevealSuppressed is readonly and writes go through a method.
+    // Probing for the property still succeeds there, so probe the method first
+    // and keep the direct assignment as the pre-4.0.3 fallback.
+    if (root.bar && typeof root.bar.setCenterHoverRevealSuppressed === "function")
+      root.bar.setCenterHoverRevealSuppressed(value)
+    else if (root.bar && "centerHoverRevealSuppressed" in root.bar)
       root.bar.centerHoverRevealSuppressed = value
   }
 
